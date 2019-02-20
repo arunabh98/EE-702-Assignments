@@ -1,4 +1,3 @@
-# Import packages
 import create_sphere_depth_map as csdm
 import math
 import numpy as np
@@ -8,6 +7,7 @@ from skimage.filters import sobel
 from skimage import morphology
 from skimage.color import label2rgb
 from scipy import ndimage as ndi
+from sklearn.metrics import mean_squared_error
 
 radiance_noise_values = [0.0, 0.05, 0.1, 0.15]
 image_size = 40
@@ -19,54 +19,49 @@ fig1 = plt.imshow(Z_original)
 plt.title('Original Depth Map')
 plt.show()
 
+# First we construct the depthmap of the sphere.
+source_vector = [0, 0, 1]
+source_noise = 0
+image_radius = 0.3*image_size
+num_iter = 1500
+lambda_value = 0.001
+depth_num_iter = 1500
+
+# Define the source vector and add noise to it.
+source_vector = source_vector + np.random.normal(0, 1, 3)*source_noise
+source_magnitude = np.linalg.norm(source_vector)
+
+gradient_pq = np.zeros(shape=(image_size, image_size, 3))
+
+# Calculate the gradient and the therefore the lambertian surface radiance equation
+# to calculate the radiance at each point.
+E = np.zeros((image_size, image_size))
+for i in range(0, image_size - 1):
+    for j in range(0, image_size - 1):
+         if object_map[i][j]:
+            p = Z_original[i][j] - Z_original[i][j-1]
+            q = Z_original[i][j] - Z_original[i-1][j]
+            gradient_pq[i][j] = np.array([p, q, 1])
+            gradient_magnitude = np.linalg.norm(gradient_pq[i][j])
+            # Threshold with zero.
+            E[i][j] = max(np.dot(gradient_pq[i][j], source_vector)/(source_magnitude*gradient_magnitude), 0)
+
+fig, axes = plt.subplots(1, 2, figsize=(8, 3), sharey=True, constrained_layout=True)
+axes[0].imshow(gradient_pq[:,:,0])
+axes[0].set_title('p')
+axes[1].imshow(gradient_pq[:,:,1])
+axes[1].set_title('q')
+for a in axes:
+    a.axis('off')
+plt.show()
+
 for iteration in range(len(radiance_noise_values)):
     print("Noise in E(x, y): " + str(radiance_noise_values[iteration]))
-    # First we construct the depthmap of the sphere.
-    source_vector = [0, 0, 1]
-    source_noise = 0
     radiance_noise = radiance_noise_values[iteration]
-    image_radius = 0.3*image_size
-    num_iter = 1100
-    lambda_value = 150
-    depth_num_iter = 900
-
-    # Define the source vector and add noise to it.
-    source_vector = source_vector + np.random.normal(0, 1, 3)*source_noise
-    source_magnitude = np.linalg.norm(source_vector)
-
-    gradient_pq = np.zeros(shape=(image_size, image_size, 3))
-
-    # Calculate the gradient and the therefore the lambertian surface radiance equation
-    # to calculate the radiance at each point.
-    E = np.zeros((image_size, image_size))
-    for i in range(0, image_size - 1):
-        for j in range(0, image_size - 1):
-             if object_map[i][j]:
-                p = Z_original[i][j] - Z_original[i][j-1]
-                q = Z_original[i][j] - Z_original[i-1][j]
-                gradient_pq[i][j] = np.array([p, q, 1])
-                gradient_magnitude = np.linalg.norm(gradient_pq[i][j])
-                # Threshold with zero.
-                E[i][j] = max(np.dot(gradient_pq[i][j], source_vector)/(source_magnitude*gradient_magnitude), 0)
-
-    fig, axes = plt.subplots(1, 2, figsize=(8, 3), sharey=True, constrained_layout=True)
-    axes[0].imshow(gradient_pq[:,:,0])
-    axes[0].set_title('p')
-    axes[1].imshow(gradient_pq[:,:,1])
-    axes[1].set_title('q')
-    for a in axes:
-        a.axis('off')
-    fig.suptitle('Noise radiance: ' + str(radiance_noise))
-    plt.show()
-
     # Calculate the noise added to the radiance.
     noise_vector = np.random.normal(0, 1, image_size * image_size)*radiance_noise
     noise_matrix = noise_vector.reshape(image_size, image_size)
     E = E + noise_matrix
-
-    fig = plt.imshow(E)
-    plt.title('Observed image radiance with noise: ' + str(radiance_noise))
-    plt.show()
 
     # First we extract the image. Then we extract the boundary.
     # Second attempted.
@@ -159,22 +154,24 @@ for iteration in range(len(radiance_noise_values)):
                 if segmentation[i][j] and (not boundary_map[i][j]):
                     # Current value of radiance estimated by our model.
                     gradient_magnitude = np.linalg.norm(gradient_pq_estimated[i][j])
-                    current_estimated_radiance = np.dot(gradient_pq_estimated[i][j], source_vector)/(source_magnitude*gradient_magnitude)
+                    current_estimated_radiance = \
+                    np.dot(gradient_pq_estimated[i][j], source_vector)/(source_magnitude*gradient_magnitude)
                     
                     # Compute the gradient of R(p, q) with respect to p and q.
                     denominator_gradient = source_magnitude*math.pow(gradient_magnitude, 3)
-                    Rp = (gradient_pq_estimated[i][j][0] + (gradient_pq_estimated[i][j][0]**2)*source_vector[1] - gradient_pq_estimated[i][j][0] - \
-                        gradient_pq_estimated[i][j][1]*gradient_pq_estimated[i][j][0]*source_vector[1])/denominator_gradient
-                    Rq = (gradient_pq_estimated[i][j][1] + (gradient_pq_estimated[i][j][0]**2)*source_vector[0] - gradient_pq_estimated[i][j][1] - \
-                        gradient_pq_estimated[i][j][1]*gradient_pq_estimated[i][j][0]*source_vector[0])/denominator_gradient
+                    Rp = ((gradient_pq_estimated[i][j][1]**2)*source_vector[0] + source_vector[0] - gradient_pq_estimated[i][j][1]*gradient_pq_estimated[i][j][0]*source_vector[1] - gradient_pq_estimated[i][j][0])/denominator_gradient
+                    Rq = ((gradient_pq_estimated[i][j][0]**2)*source_vector[1] + source_vector[1] - gradient_pq_estimated[i][j][0]*gradient_pq_estimated[i][j][1]*source_vector[0] - gradient_pq_estimated[i][j][1])/denominator_gradient
                     
                     # Compute the next q and q estimates.
-                    next_gradient_pq[i][j] = 0.25*(gradient_pq_estimated[i+1][j] + gradient_pq_estimated[i][j+1] + gradient_pq_estimated[i-1][j] + gradient_pq_estimated[i][j-1])
-                    next_gradient_pq[i][j][0] = next_gradient_pq[i][j][0] + lambda_value*(current_estimated_radiance - E[i][j])*Rp
-                    next_gradient_pq[i][j][1] = next_gradient_pq[i][j][1] + lambda_value*(current_estimated_radiance - E[i][j])*Rq
+                    next_gradient_pq[i][j] = 0.25*(gradient_pq_estimated[i+1][j] + gradient_pq_estimated[i][j+1] + \
+                                                   gradient_pq_estimated[i-1][j] + gradient_pq_estimated[i][j-1])
+                    next_gradient_pq[i][j][0] = next_gradient_pq[i][j][0] + \
+                    lambda_value*(current_estimated_radiance - E[i][j])*Rp
+                    next_gradient_pq[i][j][1] = next_gradient_pq[i][j][1] + \
+                    lambda_value*(current_estimated_radiance - E[i][j])*Rq
 
         # Update the gradient values
-        gradient_pq_estimated = next_gradient_pq
+        gradient_pq_estimated = np.array(next_gradient_pq,copy=True)
 
     estimated_p = np.multiply(gradient_pq_estimated[:,:,0], segmentation)
     estimated_q = np.multiply(gradient_pq_estimated[:,:,1], segmentation)
@@ -195,13 +192,25 @@ for iteration in range(len(radiance_noise_values)):
         for i in range(1, image_size - 1):
             for j in range(1, image_size - 1):
                 if segmentation[i][j]:
-                    next_Z[i][j] = 0.25*(Z_estimated[i-1][j] + Z_estimated[i+1][j] + Z_estimated[i][j-1] + Z_estimated[i][j+1]) + abs(gradient_p_x[i][j]) + abs(gradient_q_y[i][j])
+                    next_Z[i][j] = 0.25*(Z_estimated[i-1][j] + Z_estimated[i+1][j] + \
+                                         Z_estimated[i][j-1] + Z_estimated[i][j+1]) + abs(gradient_p_x[i][j]) + \
+                                         abs(gradient_q_y[i][j])
 
         Z_estimated = segmentation*next_Z
 
     Z_estimated = Z_estimated*segmentation
+    
+    # Display error.
+    normalized_z_est = cv.normalize(Z_estimated, None, 0.0, 1.0, cv.NORM_MINMAX)
+    normalized_z_orig = cv.normalize(Z_original, None, 0.0, 1.0, cv.NORM_MINMAX)
+    print("Error: " + str(mean_squared_error(normalized_z_est, normalized_z_orig)))
 
-    # Show the estimated value of depth.
-    fig = plt.imshow(Z_estimated)
-    plt.title('Estimated depth for noise radiance: ' + str(radiance_noise))
+    fig, axes = plt.subplots(1, 2, figsize=(8, 3), sharey=True, constrained_layout=True)
+    axes[0].imshow(E)
+    axes[0].set_title('Observed image radiance')
+    axes[1].imshow(normalized_z_est)
+    axes[1].set_title('Estimated depth-map')
+    for a in axes:
+        a.axis('off')
+    fig.suptitle('Noise radiance: ' + str(radiance_noise))
     plt.show()

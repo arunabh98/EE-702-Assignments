@@ -1,4 +1,3 @@
-# Import packages
 import create_sphere_depth_map as csdm
 import math
 import numpy as np
@@ -8,46 +7,48 @@ from skimage.filters import sobel
 from skimage import morphology
 from skimage.color import label2rgb
 from scipy import ndimage as ndi
-from skimage.transform import downscale_local_mean
-from skimage import color
-from skimage import io
 from sklearn.metrics import mean_squared_error
 
+radiance_noise_values = [0.0, 0.05, 0.1, 0.15]
+image_size = 40
+Z_original = csdm.create_depth_map_of_sphere(image_size)
+object_map = np.zeros((image_size, image_size))
+object_map[Z_original > 0] = 1
+
 # First we construct the depthmap of the sphere.
-image_size = 200
+source_vector = [0, 0, 1]
+source_noise = 0.0
+image_radius = 0.3*image_size
+num_iter = 1500
+lambda_value = 0.001
+depth_num_iter = 1500
 
-# Read the image, convert it to grayscale and normalize it.
-# This will be our radiance value.
-img = color.rgb2gray(io.imread('images/7.jpg'))
-out = cv.normalize(img.astype('float'), None, 0.0, 1.0, cv.NORM_MINMAX)
-E = downscale_local_mean(out, (10, 10))
+# Define the source vector and add noise to it.
+source_vector = source_vector + np.random.normal(0, 1, 3)*source_noise
+source_magnitude = np.linalg.norm(source_vector)
 
-E = cv.resize(E, (image_size, image_size))
+gradient_pq = np.zeros(shape=(image_size, image_size, 3))
 
-radiance_noise_values = [0.0]
+# Calculate the gradient and the therefore the lambertian surface radiance equation
+# to calculate the radiance at each point.
+E = np.zeros((image_size, image_size))
+for i in range(0, image_size - 1):
+    for j in range(0, image_size - 1):
+         if object_map[i][j]:
+            p = Z_original[i][j] - Z_original[i][j-1]
+            q = Z_original[i][j] - Z_original[i-1][j]
+            gradient_pq[i][j] = np.array([p, q, 1])
+            gradient_magnitude = np.linalg.norm(gradient_pq[i][j])
+            # Threshold with zero.
+            E[i][j] = max(np.dot(gradient_pq[i][j], source_vector)/(source_magnitude*gradient_magnitude), 0)
 
 for iteration in range(len(radiance_noise_values)):
-    # First we construct the depthmap of the sphere.
-    source_vector = [0, 0, 1]
-    source_noise = 0.0
+    print("Noise in E(x, y): " + str(radiance_noise_values[iteration]))
     radiance_noise = radiance_noise_values[iteration]
-    image_radius = 0.3*image_size
-    num_iter = 1500
-    lambda_value = 0.001
-    depth_num_iter = 1500
-
-    # Define the source vector and add noise to it.
-    source_vector = source_vector + np.random.normal(0, 1, 3)*source_noise
-    source_magnitude = np.linalg.norm(source_vector)
-
     # Calculate the noise added to the radiance.
     noise_vector = np.random.normal(0, 1, image_size * image_size)*radiance_noise
     noise_matrix = noise_vector.reshape(image_size, image_size)
     E = E + noise_matrix
-
-    fig = plt.imshow(E)
-    plt.title('Observed image radiance')
-    plt.show()
 
     # First we extract the image. Then we extract the boundary.
     # Second attempted.
@@ -97,18 +98,6 @@ for iteration in range(len(radiance_noise_values)):
     # E_normalized = cv.cvtColor(E_normalized, cv.COLOR_GRAY2BGR)
     # markers = cv.watershed(E_normalized, markers)
 
-    # Display the segmented image.
-    fig, axes = plt.subplots(1, 2, figsize=(8, 3), sharey=True, constrained_layout=True)
-    axes[0].imshow(E_normalized, cmap=plt.cm.gray, interpolation='nearest')
-    axes[0].contour(segmentation, [0.5], linewidths=1.2, colors='y')
-    axes[0].set_title('Segmented object with yellow border around it')
-    axes[1].imshow(image_label_overlay, interpolation='nearest')
-    axes[1].set_title('All objects detected in the image')
-    for a in axes:
-        a.axis('off')
-    fig.suptitle('Noise radiance: ' + str(radiance_noise))
-    plt.show()
-
     # Shown below is the segmented image along with the boundary.
 
     # Extract the boundary of an image
@@ -148,9 +137,9 @@ for iteration in range(len(radiance_noise_values)):
                     Rq = ((gradient_pq_estimated[i][j][0]**2)*source_vector[1] + source_vector[1] - gradient_pq_estimated[i][j][0]*gradient_pq_estimated[i][j][1]*source_vector[0] - gradient_pq_estimated[i][j][1])/denominator_gradient
 
                     # Compute the next q and q estimates.
-                    next_gradient_pq[i][j] = 0.25*(gradient_pq_estimated[i+1][j] + gradient_pq_estimated[i][j+1] + gradient_pq_estimated[i-1][j] + gradient_pq_estimated[i][j-1])
-                    next_gradient_pq[i][j][0] = next_gradient_pq[i][j][0] + lambda_value*(current_estimated_radiance - E[i][j])*Rp
-                    next_gradient_pq[i][j][1] = next_gradient_pq[i][j][1] + lambda_value*(current_estimated_radiance - E[i][j])*Rq
+                    next_gradient_pq[i][j] = 0.25*(gradient_pq_estimated[i+2][j] + gradient_pq_estimated[i][j+2] + gradient_pq_estimated[i-2][j] + gradient_pq_estimated[i][j-2])
+                    next_gradient_pq[i][j][0] = next_gradient_pq[i][j][0] + 4*lambda_value*(current_estimated_radiance - E[i][j])*Rp
+                    next_gradient_pq[i][j][1] = next_gradient_pq[i][j][1] + 4*lambda_value*(current_estimated_radiance - E[i][j])*Rq
 
         # Update the gradient values
         gradient_pq_estimated = np.array(next_gradient_pq,copy=True)
@@ -180,7 +169,12 @@ for iteration in range(len(radiance_noise_values)):
 
     Z_estimated = Z_estimated*segmentation
 
-    # Show the estimated value of depth.
-    fig = plt.imshow(Z_estimated)
-    plt.title('Estimated depth for noise radiance: ' + str(radiance_noise))
+    fig, axes = plt.subplots(1, 2, figsize=(8, 3), sharey=True, constrained_layout=True)
+    axes[0].imshow(E)
+    axes[0].set_title('Observed image radiance')
+    axes[1].imshow(Z_estimated)
+    axes[1].set_title('Estimated depth-map')
+    for a in axes:
+        a.axis('off')
+    fig.suptitle('Noise radiance: ' + str(radiance_noise))
     plt.show()

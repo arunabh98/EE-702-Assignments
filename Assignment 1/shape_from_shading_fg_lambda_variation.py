@@ -7,6 +7,7 @@ from skimage.filters import sobel
 from skimage import morphology
 from skimage.color import label2rgb
 from scipy import ndimage as ndi
+import transform_variables as tv
 from sklearn.metrics import mean_squared_error
 
 radiance_noise_values = [0.0, 0.02, 0.04, 0.06, 0.08, 0.1]
@@ -19,10 +20,10 @@ object_map[Z_original > 0] = 1
 for iteration in range(len(radiance_noise_values)):
     # First we construct the depthmap of the sphere.
     source_vector = [0, 0, 1]
-    source_noise = 0
+    source_noise = 0.0
     radiance_noise = radiance_noise_values[iteration]
     image_radius = 0.3*image_size
-    num_iter = 700
+    num_iter = 1500
     depth_num_iter = 1500
 
     # Define the source vector and add noise to it.
@@ -97,18 +98,6 @@ for iteration in range(len(radiance_noise_values)):
     # E_normalized = cv.cvtColor(E_normalized, cv.COLOR_GRAY2BGR)
     # markers = cv.watershed(E_normalized, markers)
 
-    # # Display the segmented image.
-    # fig, axes = plt.subplots(1, 2, figsize=(8, 3), sharey=True, constrained_layout=True)
-    # axes[0].imshow(E_normalized, cmap=plt.cm.gray, interpolation='nearest')
-    # axes[0].contour(segmentation, [0.5], linewidths=1.2, colors='y')
-    # axes[0].set_title('Segmented object with yellow border around it')
-    # axes[1].imshow(image_label_overlay, interpolation='nearest')
-    # axes[1].set_title('All objects detected in the image')
-    # for a in axes:
-    #     a.axis('off')
-    # fig.suptitle('Noise radiance: ' + str(radiance_noise))
-    # plt.show()
-
     # Shown below is the segmented image along with the boundary.
 
     # Extract the boundary of an image
@@ -125,6 +114,7 @@ for iteration in range(len(radiance_noise_values)):
         # Calculate the boundary at the gradient.
         # p, q is initialized using the gradient at the boundary.
         del_Y, del_X = np.gradient(E)
+        del_X, del_Y = tv.pq_to_fg(del_X, del_Y)
         gradient_pq_estimated = np.zeros(shape=(image_size, image_size, 3))
 
         # initialize p,q values at the boundaries.
@@ -149,7 +139,6 @@ for iteration in range(len(radiance_noise_values)):
                         denominator_gradient = source_magnitude*math.pow(gradient_magnitude, 3)
                         Rp = ((gradient_pq_estimated[i][j][1]**2)*source_vector[0] + source_vector[0] - gradient_pq_estimated[i][j][1]*gradient_pq_estimated[i][j][0]*source_vector[1] - gradient_pq_estimated[i][j][0])/denominator_gradient
                         Rq = ((gradient_pq_estimated[i][j][0]**2)*source_vector[1] + source_vector[1] - gradient_pq_estimated[i][j][0]*gradient_pq_estimated[i][j][1]*source_vector[0] - gradient_pq_estimated[i][j][1])/denominator_gradient
-    
                         # Compute the next q and q estimates.
                         next_gradient_pq[i][j] = 0.25*(gradient_pq_estimated[i+1][j] + gradient_pq_estimated[i][j+1] + gradient_pq_estimated[i-1][j] + gradient_pq_estimated[i][j-1])
                         next_gradient_pq[i][j][0] = next_gradient_pq[i][j][0] + lambda_value*(current_estimated_radiance - E[i][j])*Rp
@@ -161,7 +150,8 @@ for iteration in range(len(radiance_noise_values)):
                 lambda_break = 1
                 convergent_lambda = lambda_values[lambda_value_iter]
                 break;
-            gradient_pq_estimated = np.array(next_gradient_pq,copy=True)
+            estimated_p, estimated_q = tv.fg_to_pq(next_gradient_pq[:,:,0], next_gradient_pq[:,:,1])
+            gradient_pq_estimated = np.dstack((estimated_p, estimated_q, np.ones((image_size, image_size))));
 
         if lambda_break == 0:
             break;

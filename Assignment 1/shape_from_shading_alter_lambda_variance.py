@@ -22,7 +22,7 @@ for iteration in range(len(radiance_noise_values)):
     source_noise = 0
     radiance_noise = radiance_noise_values[iteration]
     image_radius = 0.3*image_size
-    num_iter = 700
+    num_iter = 1500
     depth_num_iter = 1500
 
     # Define the source vector and add noise to it.
@@ -97,18 +97,6 @@ for iteration in range(len(radiance_noise_values)):
     # E_normalized = cv.cvtColor(E_normalized, cv.COLOR_GRAY2BGR)
     # markers = cv.watershed(E_normalized, markers)
 
-    # # Display the segmented image.
-    # fig, axes = plt.subplots(1, 2, figsize=(8, 3), sharey=True, constrained_layout=True)
-    # axes[0].imshow(E_normalized, cmap=plt.cm.gray, interpolation='nearest')
-    # axes[0].contour(segmentation, [0.5], linewidths=1.2, colors='y')
-    # axes[0].set_title('Segmented object with yellow border around it')
-    # axes[1].imshow(image_label_overlay, interpolation='nearest')
-    # axes[1].set_title('All objects detected in the image')
-    # for a in axes:
-    #     a.axis('off')
-    # fig.suptitle('Noise radiance: ' + str(radiance_noise))
-    # plt.show()
-
     # Shown below is the segmented image along with the boundary.
 
     # Extract the boundary of an image
@@ -149,11 +137,10 @@ for iteration in range(len(radiance_noise_values)):
                         denominator_gradient = source_magnitude*math.pow(gradient_magnitude, 3)
                         Rp = ((gradient_pq_estimated[i][j][1]**2)*source_vector[0] + source_vector[0] - gradient_pq_estimated[i][j][1]*gradient_pq_estimated[i][j][0]*source_vector[1] - gradient_pq_estimated[i][j][0])/denominator_gradient
                         Rq = ((gradient_pq_estimated[i][j][0]**2)*source_vector[1] + source_vector[1] - gradient_pq_estimated[i][j][0]*gradient_pq_estimated[i][j][1]*source_vector[0] - gradient_pq_estimated[i][j][1])/denominator_gradient
-    
                         # Compute the next q and q estimates.
-                        next_gradient_pq[i][j] = 0.25*(gradient_pq_estimated[i+1][j] + gradient_pq_estimated[i][j+1] + gradient_pq_estimated[i-1][j] + gradient_pq_estimated[i][j-1])
-                        next_gradient_pq[i][j][0] = next_gradient_pq[i][j][0] + lambda_value*(current_estimated_radiance - E[i][j])*Rp
-                        next_gradient_pq[i][j][1] = next_gradient_pq[i][j][1] + lambda_value*(current_estimated_radiance - E[i][j])*Rq
+                        next_gradient_pq[i][j] = 0.25*(gradient_pq_estimated[i+2][j] + gradient_pq_estimated[i][j+2] + gradient_pq_estimated[i-2][j] + gradient_pq_estimated[i][j-2])
+                        next_gradient_pq[i][j][0] = next_gradient_pq[i][j][0] + 4*lambda_value*(current_estimated_radiance - E[i][j])*Rp
+                        next_gradient_pq[i][j][1] = next_gradient_pq[i][j][1] + 4*lambda_value*(current_estimated_radiance - E[i][j])*Rq
 
             # Update the gradient values
             error_iteration = np.linalg.norm(gradient_pq_estimated - next_gradient_pq)
@@ -199,7 +186,7 @@ for iteration in range(len(radiance_noise_values)):
     fig, axes = plt.subplots(1, 2, figsize=(8, 3), sharey=True, constrained_layout=True)
     axes[0].imshow(normalized_z_orig)
     axes[0].set_title('Original depth map')
-    axes[1].imshow(normalized_z_est)
+    axes[1].imshow(Z_estimated)
     axes[1].set_title('Estimated depth-map')
     for a in axes:
         a.axis('off')
